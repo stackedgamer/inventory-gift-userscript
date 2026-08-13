@@ -1,0 +1,13 @@
+// ==UserScript==
+// @name         Inventory.gift
+// @namespace    https://inventory.gift/
+// @version      0.0.0
+// @description  Show Inventory.gift information in Steam gift inventories.
+// @match        https://steamcommunity.com/id/*/inventory*
+// @match        https://steamcommunity.com/profiles/*/inventory*
+// @connect      127.0.0.1
+// @grant        GM_addStyle
+// @grant        GM_xmlhttpRequest
+// @grant        unsafeWindow
+// @run-at       document-start
+// ==/UserScript==
