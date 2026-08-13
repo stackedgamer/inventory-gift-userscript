@@ -1,0 +1,15 @@
+{
+  "name": "inventory-gift-userscript",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Inventory.gift enhancements for Steam Community gift inventories",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs && node --check dist/inventory-gift.user.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=24 <25",
+    "npm": ">=11"
+  }
+}
