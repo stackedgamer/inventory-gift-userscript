@@ -1,6 +1,6 @@
 # Architecture
 
-Status: initial proof-of-concept design
+Status: supported inventory-only release
 
 ## Runtime boundary
 
@@ -28,10 +28,19 @@ classId -> lookup state
 ```
 
 ClassIDs are deduplicated across initial and paginated inventory responses.
-New ClassIDs are looked up in a debounced batch. The first API contract will
-place a fixed upper bound on each request; larger sets are chunked.
+New ClassIDs are looked up in debounced batches of at most 100; larger sets are
+chunked.
 
-No inventory state is persisted in the proof of concept.
+No inventory state is persisted by the userscript.
+
+The bridge observes Steam's existing `validateunpack` fetch/XHR request when
+the owner selects a gift. The validated response is retained in memory as a
+local fallback for the detail block and submitted when the ClassID lookup is
+unknown, the effective SubID is missing, or the backend name is an
+unknown-package placeholder. The userscript does not issue a second request for
+selection. Its explicit bulk collector uses the original page fetch reference
+captured before bridge installation, preventing those intentional requests from
+also entering the click-observation path.
 
 ## DOM integration
 
@@ -59,14 +68,19 @@ DOM anchors are contained within the userscript. They may update the small
 status message but must not stop Steam navigation, inventory pagination, or
 item selection.
 
-## Later collection phase
+## Collection phase
 
-The later `validateunpack` phase begins only after a user presses one action.
-One run attempts all currently loaded missing ClassIDs, using one
-representative asset per ClassID. Requests are sequential, initially 500 ms
-apart, and the UI will expose progress and cancellation. A request failure will
-flush completed observations, stop the run, and report the failure.
+The `validateunpack` phase begins only after a user presses one action.
+One run attempts all currently loaded recognized ClassIDs whose effective SubID
+is missing, using one representative asset per ClassID. An effective SubID is
+the durable checked marker; an unknown-package display name alone does not keep
+a ClassID in the bulk queue. Requests are sequential, initially 500 ms apart,
+and the UI exposes progress and cancellation. A request failure flushes
+completed observations, stops the run, and reports the failure.
 
-The exact delay is an initial conservative value, not a promise that Steam
-permits or will tolerate the traffic. Rate-limit or authentication responses
-must stop the run immediately.
+Completed results are checkpointed every 20 gifts and any remainder is
+submitted when the run completes, is cancelled, or stops after an error. An
+empty Steam `gift_name` is submitted as a missing name instead of invalidating
+an otherwise valid package result. The delay is deliberately conservative and
+is not a promise that Steam permits or will tolerate the traffic. Rate-limit or
+authentication responses stop the run immediately.
