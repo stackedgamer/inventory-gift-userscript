@@ -1,8 +1,17 @@
 {
   "name": "inventory-gift-userscript",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "description": "Inventory.gift enhancements for Steam Community gift inventories",
+  "license": "MIT",
+  "homepage": "https://inventory.gift/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stackedgamer/inventory-gift-userscript.git"
+  },
+  "bugs": {
+    "url": "https://github.com/stackedgamer/inventory-gift-userscript/issues"
+  },
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs && node --check dist/inventory-gift.user.js",

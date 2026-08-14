@@ -1,64 +1,92 @@
-# Inventory.gift userscript
+# Inventory.gift for Steam inventories
 
-This independent userscript project will add Inventory.gift information to
-Steam Community gift inventory pages without delaying or replacing Steam's
-normal interface.
+Inventory.gift adds useful gift information to Steam Community inventories. It
+shows the Inventory.gift display name, known owner count, and package ID (SubID)
+beside the gift you select, without replacing Steam's own information.
 
-The first proof of concept is read-only. As Steam loads gift inventory pages,
-the script learns the relationship between the currently loaded asset IDs and
-ClassIDs, asks Inventory.gift for known information, and adds a labelled block
-to the selected gift's detail panel.
+The script is intentionally focused on gift inventories. It does not change
+trade offer windows or other places where Steam displays gifts.
 
-## Current status
+## Install
 
-Early proof of concept. The capture, validation, status UI, detail-panel
-integration, and corresponding Inventory.gift lookup API are implemented in
-their local repositories. Browser fixture and live-page compatibility testing
-remain before the first supported release. If lookup is unavailable, the
-userscript reports that failure and otherwise leaves Steam unchanged.
+1. Install [Tampermonkey](https://www.tampermonkey.net/) for your browser.
+2. Click **[Install Inventory.gift](https://raw.githubusercontent.com/stackedgamer/inventory-gift-userscript/main/dist/inventory-gift.user.js)**.
+3. Tampermonkey will show the script and ask for confirmation. Choose
+   **Install**.
+4. Open or reload a Steam Community inventory.
 
-Trade offers and authenticated package discovery through Steam's
-`validateunpack` endpoint are intentionally outside this first milestone.
+Tampermonkey is the recommended userscript manager. Other compatible managers
+may work, but are not currently tested.
 
-## Development
+## Use
+
+Open a Steam profile's inventory and choose **Steam** → **Gifts**. When you
+select a gift, an **Inventory.gift** section appears in Steam's detail panel.
+Names, owner counts, and SubIDs are links when a useful destination is
+available.
+
+In your own inventory, the script can also show a **Check missing SubIDs**
+button. It checks each currently loaded gift type whose SubID is not yet known.
+Checks run one at a time and results are saved in groups of 20, so stopping a
+long run does not throw away everything already completed. You can cancel at
+any time.
+
+Only inventory pages Steam has loaded are included. If your inventory has more
+pages, load them before starting the check if you want them included.
+
+The script also reuses the package check Steam already performs when you click
+a gift in your own inventory. It does not send a second copy of that request.
+
+## Updates and troubleshooting
+
+Tampermonkey checks the same installation link for newer versions. Leave the
+script enabled in Tampermonkey to receive updates.
+
+If the Inventory.gift section does not appear:
+
+- make sure the userscript is enabled;
+- reload the Steam inventory page;
+- confirm you are viewing the **Steam Gifts** inventory; and
+- check whether [Inventory.gift](https://inventory.gift/) is available.
+
+Problems and suggestions are welcome in
+[GitHub Issues](https://github.com/stackedgamer/inventory-gift-userscript/issues).
+
+## Privacy
+
+The script sends loaded gift ClassIDs to Inventory.gift so it can look up the
+matching display information. When you deliberately check missing SubIDs—or
+when Steam checks a gift you select in your own inventory—it may submit the
+ClassID, returned SubID and name, and the viewed inventory's SteamID as an
+observation.
+
+It does not send Steam cookies, session tokens, or inventory asset IDs to
+Inventory.gift. See the [plain-language privacy details](docs/privacy.md) for
+the complete data boundary.
+
+## For developers
+
+The readable source, tests, and build script are included so the published
+userscript can be reviewed and reproduced. The installable file at
+`dist/inventory-gift.user.js` is generated from `src/`; do not edit it by hand.
 
 Requirements:
 
 - Node.js 24
 - npm 11
 
-Run the focused tests and build the installable file:
+Run the test suite and rebuild the installable file:
 
 ```sh
 npm test
 npm run build
 ```
 
-The generated userscript is written to
-`dist/inventory-gift.user.js`. The `dist` directory is not committed.
+Before publishing a change, update the version in `package.json`, run both
+commands, and commit the updated source and generated file together.
 
-For local API development, edit the `apiBaseUrl` constant in `src/main.js`
-before building. A configurable development setting will be added only when it
-is needed for the first end-to-end integration.
-
-## Permissions and privacy
-
-The script is scoped to Steam Community inventory pages and may contact only
-Inventory.gift. Its page-context access is used to observe the gift inventory
-response and rendered page; it does not read or transmit Steam cookies or
-authentication tokens. The read-only milestone sends batches of loaded
-ClassIDs to Inventory.gift and keeps asset IDs in browser memory only.
-
-See [Privacy](docs/privacy.md) for the current data boundary and
-[Architecture](docs/architecture.md) for implementation details.
-
-## Installation
-
-Public installation instructions will be added after the lookup API and the
-first supported release are ready. This repository currently has no published
-release or remote update URL.
+See [Architecture](docs/architecture.md) for implementation details.
 
 ## License
 
-A public-source license has not been selected yet. Do not redistribute a
-release until the repository owner adds one.
+Inventory.gift is available under the [MIT License](LICENSE).
