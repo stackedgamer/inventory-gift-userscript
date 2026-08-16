@@ -14,16 +14,10 @@ trade offer windows or other places where Steam displays gifts.
 3. Tampermonkey will show the script and ask for confirmation. Choose
    **Install**.
 4. Open or reload a Steam Community inventory.
-5. In the **Inventory.gift** status row beneath Steam's inventory selector,
-   choose **Connect to Inventory.gift**. The script opens Inventory.gift in a
-   new tab.
-6. Sign in to Inventory.gift with Steam if needed, then approve the one-time
-   connection request. Return to the Steam inventory when its status changes
-   to **Connected**.
-
-Connecting is required before the script can look up gift details or check and
-report missing SubIDs. The connection is stored privately by the userscript in
-that browser; installing the script does not connect an account automatically.
+5. In your Steam inventory, click **Connect to Inventory.gift**.
+6. Sign in to Inventory.gift, approve the request, and return to Steam.
+7. Wait until the message says **Connected**. Gift details and SubID checks
+   will not work until you connect.
 
 Tampermonkey is the recommended userscript manager. Other compatible managers
 may work, but are not currently tested.
@@ -35,10 +29,8 @@ select a gift, an **Inventory.gift** section appears in Steam's detail panel.
 Names, owner counts, and SubIDs are links when a useful destination is
 available.
 
-The script stays disconnected until you approve an Inventory.gift account. Its
-status area also provides **Disconnect**, which revokes that browser's private
-credential without signing you out of the website or affecting other connected
-browsers.
+If the status says **Connect to Inventory.gift**, click it and follow the
+sign-in steps. You can later click **Disconnect** in the same place.
 
 In your own inventory, the script can also show a **Check missing SubIDs**
 button. It checks each currently loaded gift type whose SubID is not yet known.
