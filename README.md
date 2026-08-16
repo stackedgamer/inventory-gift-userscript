@@ -14,7 +14,7 @@ trade offer windows or other places where Steam displays gifts.
 3. Tampermonkey will show the script and ask for confirmation. Choose
    **Install**.
 4. Open or reload a Steam Community inventory.
-5. In your Steam inventory, click **Connect to Inventory.gift**.
+5. Click on **Connect to Inventory.gift**.
 6. Sign in to Inventory.gift, approve the request, and return to Steam.
 7. Wait until the message says **Connected**. Gift details and SubID checks
    will not work until you connect.
