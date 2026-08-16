@@ -3,9 +3,16 @@ const siteBaseUrl = "http://localhost:3000";
 const lookupBatchSize = 100;
 const lookupDebounceMs = 150;
 const validateUnpackDelayMs = 500;
+const selectedGiftValidationDelayMs = 100;
 const observationCheckpointSize = 20;
-const bridgeEventName = `inventory-gift:assets:${crypto.randomUUID()}`;
-const validateBridgeEventName = `inventory-gift:validate:${crypto.randomUUID()}`;
+const credentialStorageKey = "inventory-gift:credential";
+const captureEvents = Object.freeze({
+  failure: `inventory-gift:failure:${crypto.randomUUID()}`,
+  inventory: `inventory-gift:assets:${crypto.randomUUID()}`,
+  validate: `inventory-gift:validate:${crypto.randomUUID()}`,
+  validateEnd: `inventory-gift:validate-end:${crypto.randomUUID()}`,
+  validateStart: `inventory-gift:validate-start:${crypto.randomUUID()}`,
+});
 const steamFetch = unsafeWindow.fetch.bind(unsafeWindow);
 const assetClassIds = new Map();
 const capturedValidateResponses = new Map();
@@ -15,144 +22,103 @@ const pendingClassIds = new Set();
 const pendingObservedClassIds = new Set();
 const submittedClassIds = new Set();
 const submittingObservedClassIds = new Set();
+const unreportableClassIds = new Set();
+const externalValidateRequests = new Set();
+let credential = GM_getValue(credentialStorageKey, null);
+if (!isUserscriptCredential(credential)) {
+  credential = null;
+  GM_deleteValue(credentialStorageKey);
+}
 let inventorySteamId64 = null;
+let connectedSteamId64 = null;
 let lookupTimer = null;
 let lookupInFlight = false;
 let lastLookupError = null;
+let lastCaptureError = null;
+let selectedValidationAbortController = null;
+let selectedValidationAssetId = null;
+let selectedValidationAttempted = false;
+let selectedValidationTimer = null;
 let collectionCancelled = false;
+let connectionState = {
+  kind: credential === null ? "disconnected" : "connected",
+  message: null,
+};
 let collectionState = { completed: 0, kind: "idle", message: null, total: 0 };
 
-function installCaptureBridge(pageWindow) {
-  const inventoryRequest = (value) => {
-    try {
-      const url = new URL(String(value), pageWindow.location.href);
-      const match = /^\/inventory\/([0-9]{17})\/753\/1\/?$/.exec(url.pathname);
-      return url.origin === "https://steamcommunity.com" && match?.[1]
-        ? { steamId64: match[1] }
-        : null;
-    } catch {
-      return null;
-    }
-  };
-
-  const validateUnpackAssetId = (value) => {
-    return validateUnpackAssetIdFromUrl(
-      String(value),
-      pageWindow.location.href,
-    );
-  };
-
-  const emitInventory = (value, steamId64) => {
-    if (
-      value !== null &&
-      typeof value === "object" &&
-      Array.isArray(value.assets)
-    ) {
-      const assets = value.assets.flatMap((candidate) => {
-        if (candidate === null || typeof candidate !== "object") return [];
-        return [
-          {
-            appid: candidate.appid,
-            assetid: candidate.assetid,
-            classid: candidate.classid,
-            contextid: candidate.contextid,
-          },
-        ];
-      });
-      pageWindow.dispatchEvent(
-        new pageWindow.CustomEvent(bridgeEventName, {
-          detail: { assets, steamId64 },
-        }),
-      );
-    }
-  };
-
-  const emitValidateUnpack = (value, assetId) => {
-    pageWindow.dispatchEvent(
-      new pageWindow.CustomEvent(validateBridgeEventName, {
-        detail: { assetId, response: value },
-      }),
-    );
-  };
-
-  const originalFetch = pageWindow.fetch;
-  pageWindow.fetch = function inventoryGiftFetch(input, init) {
-    const result = originalFetch.apply(this, arguments);
-    const requestUrl = input instanceof pageWindow.Request ? input.url : input;
-    const request = inventoryRequest(requestUrl);
-    const validateAssetId = validateUnpackAssetId(requestUrl);
-
-    if (request !== null) {
-      void result
-        .then((response) => (response.ok ? response.clone().json() : null))
-        .then((value) => emitInventory(value, request.steamId64))
-        .catch(() => undefined);
-    }
-
-    if (validateAssetId !== null) {
-      void result
-        .then((response) => (response.ok ? response.clone().json() : null))
-        .then((value) => emitValidateUnpack(value, validateAssetId))
-        .catch(() => undefined);
-    }
-
-    return result;
-  };
-
-  const originalOpen = pageWindow.XMLHttpRequest.prototype.open;
-  pageWindow.XMLHttpRequest.prototype.open = function inventoryGiftOpen(
-    method,
-    url,
-  ) {
-    this.__inventoryGiftSteamId64 = inventoryRequest(url)?.steamId64 ?? null;
-    this.__inventoryGiftValidateAssetId = validateUnpackAssetId(url);
-    return originalOpen.apply(this, arguments);
-  };
-
-  const originalSend = pageWindow.XMLHttpRequest.prototype.send;
-  pageWindow.XMLHttpRequest.prototype.send = function inventoryGiftSend() {
-    if (
-      this.__inventoryGiftSteamId64 !== null ||
-      this.__inventoryGiftValidateAssetId !== null
-    ) {
-      const steamId64 = this.__inventoryGiftSteamId64;
-      const validateAssetId = this.__inventoryGiftValidateAssetId;
-      this.addEventListener(
-        "load",
-        () => {
-          if (this.status < 200 || this.status >= 300) return;
-          try {
-            const value =
-              this.responseType === "json"
-                ? this.response
-                : JSON.parse(String(this.responseText));
-            if (steamId64 !== null) emitInventory(value, steamId64);
-            if (validateAssetId !== null) {
-              emitValidateUnpack(value, validateAssetId);
-            }
-          } catch {
-            // Steam owns the request; capture failures must remain invisible.
-          }
-        },
-        { once: true },
-      );
-    }
-
-    return originalSend.apply(this, arguments);
-  };
+class InventoryGiftRequestError extends Error {
+  constructor(message, status, code, retryAfter) {
+    super(message);
+    this.code = code;
+    this.retryAfter = retryAfter;
+    this.status = status;
+  }
 }
 
-function requestJson(url, body) {
+function resetSelectedGiftValidation() {
+  clearTimeout(selectedValidationTimer);
+  selectedValidationTimer = null;
+  selectedValidationAbortController?.abort();
+  selectedValidationAbortController = null;
+  selectedValidationAssetId = null;
+  selectedValidationAttempted = false;
+}
+
+function clearCredential(message) {
+  credential = null;
+  connectedSteamId64 = null;
+  GM_deleteValue(credentialStorageKey);
+  connectionState = { kind: "disconnected", message };
+  collectionCancelled = true;
+  resetSelectedGiftValidation();
+  capturedValidateResponses.clear();
+  externalValidateRequests.clear();
+  giftLookups.clear();
+  localObservations.clear();
+  pendingClassIds.clear();
+  pendingObservedClassIds.clear();
+  submittedClassIds.clear();
+  unreportableClassIds.clear();
+  lastCaptureError = null;
+  lastLookupError = null;
+}
+
+function requestJson(url, body, options = {}) {
   return new Promise((resolve, reject) => {
+    const headers = { "Content-Type": "application/json" };
+    if (options.authenticated !== false && credential !== null) {
+      headers.Authorization = `Bearer ${credential}`;
+    }
     GM_xmlhttpRequest({
-      data: JSON.stringify(body),
-      headers: { "Content-Type": "application/json" },
-      method: "POST",
+      data: body === undefined ? undefined : JSON.stringify(body),
+      headers,
+      method: options.method ?? "POST",
       onerror: () => reject(new Error("Inventory.gift request failed")),
       onload: (response) => {
         if (response.status < 200 || response.status >= 300) {
+          let code = null;
+          try {
+            code = JSON.parse(response.responseText)?.error?.code ?? null;
+          } catch {}
+          const retryAfter = Number(
+            response.responseHeaders?.match(/retry-after:\s*([0-9]+)/i)?.[1],
+          );
+          const failure = classifyInventoryGiftStatus(response.status);
+          if (options.authenticated !== false && failure.reconnect) {
+            clearCredential(
+              "Connection expired or access was disabled. Reconnect to continue.",
+            );
+          }
+          const message = failure.rateLimited
+            ? `rate limited${Number.isFinite(retryAfter) ? `; retry in ${retryAfter}s` : ""}`
+            : `request returned ${response.status}`;
           reject(
-            new Error(`Inventory.gift request returned ${response.status}`),
+            new InventoryGiftRequestError(
+              `Inventory.gift ${message}`,
+              response.status,
+              code,
+              retryAfter,
+            ),
           );
           return;
         }
@@ -170,7 +136,71 @@ function requestJson(url, body) {
   });
 }
 
+async function connectUserscript() {
+  if (connectionState.kind === "connecting") return;
+  connectionState = { kind: "connecting", message: "Waiting for approval…" };
+  renderAll();
+  try {
+    const created = parsePairingCreateResponse(
+      await requestJson(
+        `${apiBaseUrl}/api/userscript/v1/pairings`,
+        {},
+        { authenticated: false },
+      ),
+    );
+    GM_openInTab(created.authorizationUrl, { active: true, insert: true });
+    const expiresAt = Date.parse(created.expiresAt);
+    while (Date.now() < expiresAt) {
+      await delay(2_000);
+      const polled = parsePairingPollResponse(
+        await requestJson(
+          `${apiBaseUrl}/api/userscript/v1/pairings/poll`,
+          {
+            pairingId: created.pairingId,
+            pollingSecret: created.pollingSecret,
+          },
+          { authenticated: false },
+        ),
+      );
+      if (polled.status === "pending") continue;
+      credential = polled.credential;
+      GM_setValue(credentialStorageKey, credential);
+      connectionState = { kind: "connected", message: "Connected" };
+      new Set(assetClassIds.values()).forEach(scheduleLookup);
+      renderAll();
+      return;
+    }
+    throw new Error("The connection request expired");
+  } catch (error) {
+    connectionState = {
+      kind: "disconnected",
+      message: error instanceof Error ? error.message : "Connection failed",
+    };
+    renderAll();
+  }
+}
+
+async function disconnectUserscript() {
+  if (credential === null) return;
+  try {
+    await requestJson(`${apiBaseUrl}/api/userscript/v1/credential`, undefined, {
+      method: "DELETE",
+    });
+    clearCredential("Disconnected");
+  } catch (error) {
+    if (credential !== null) {
+      connectionState = {
+        kind: "connected",
+        message:
+          error instanceof Error ? error.message : "Could not disconnect",
+      };
+    }
+  }
+  renderAll();
+}
+
 function scheduleLookup(classId) {
+  if (credential === null) return;
   if (giftLookups.has(classId)) return;
   pendingClassIds.add(classId);
   clearTimeout(lookupTimer);
@@ -190,7 +220,9 @@ async function flushLookups() {
         classIds: batch,
       },
     );
-    const gifts = parseLookupResponse(response);
+    const lookup = parseLookupResponse(response);
+    const gifts = lookup.gifts;
+    connectedSteamId64 = lookup.accountSteamId64;
     const returned = new Set(gifts.map((gift) => gift.classId));
 
     gifts.forEach((gift) => giftLookups.set(gift.classId, gift));
@@ -198,6 +230,7 @@ async function flushLookups() {
       if (!returned.has(classId)) giftLookups.set(classId, null);
     });
     lastLookupError = null;
+    flushCapturedValidateResponses();
   } catch (error) {
     batch.forEach((classId) => pendingClassIds.add(classId));
     lastLookupError =
@@ -315,6 +348,7 @@ function renderDetails() {
     const existing = root.querySelector("[data-inventory-gift-detail]");
 
     if (
+      credential === null ||
       !(heading instanceof HTMLElement) ||
       gift === undefined
     ) {
@@ -355,6 +389,30 @@ function renderStatus() {
     anchor.insertAdjacentElement("afterend", status);
   }
 
+  if (credential === null) {
+    const signature = JSON.stringify(connectionState);
+    if (status.dataset.renderSignature === signature) return;
+    status.dataset.renderSignature = signature;
+    status.replaceChildren();
+    const text = document.createElement("span");
+    text.textContent =
+      connectionState.message === null
+        ? "Inventory.gift: Connect to Inventory.gift to enable enrichment"
+        : `Inventory.gift: ${connectionState.message}`;
+    status.append(text);
+    const button = document.createElement("button");
+    button.className = "inventory-gift-collect";
+    button.type = "button";
+    button.disabled = connectionState.kind === "connecting";
+    button.textContent =
+      connectionState.kind === "connecting"
+        ? "Connecting…"
+        : "Connect to Inventory.gift";
+    button.addEventListener("click", () => void connectUserscript());
+    status.append(button);
+    return;
+  }
+
   const loadedClassIds = new Set(assetClassIds.values());
   const resolved = [...loadedClassIds].filter(
     (classId) => giftLookups.get(classId) != null,
@@ -374,16 +432,17 @@ function renderStatus() {
     ? `Inventory.gift: ${lastLookupError}`
     : `Inventory.gift: ${resolved.length}/${loadedClassIds.size} loaded gift types matched · ${missingSubIds.length} missing SubIDs`;
 
+  if (lastCaptureError !== null) {
+    content += ` · ${lastCaptureError}`;
+  }
+
   if (collectionState.kind === "running") {
     content += ` · Checking ${collectionState.completed}/${collectionState.total}…`;
   } else if (collectionState.message !== null) {
     content += ` · ${collectionState.message}`;
   }
 
-  const canCollect =
-    inventorySteamId64 !== null &&
-    document.querySelector("#inventory_more_dselect_container") !== null &&
-    collectibleClassIds.length > 0;
+  const canCollect = ownsViewedInventory() && collectibleClassIds.length > 0;
   const buttonLabel =
     collectionState.kind === "running"
       ? "Cancel"
@@ -420,6 +479,14 @@ function renderStatus() {
     });
     status.append(button);
   }
+  if (collectionState.kind !== "running") {
+    const disconnect = document.createElement("button");
+    disconnect.className = "inventory-gift-disconnect";
+    disconnect.type = "button";
+    disconnect.textContent = "Disconnect";
+    disconnect.addEventListener("click", () => void disconnectUserscript());
+    status.append(disconnect);
+  }
 }
 
 function collectionTargets() {
@@ -431,6 +498,7 @@ function collectionTargets() {
       needsBulkPackageObservation(gift) &&
       !localObservations.has(classId) &&
       !submittedClassIds.has(classId) &&
+      !unreportableClassIds.has(classId) &&
       !submittingObservedClassIds.has(classId) &&
       !targets.has(classId)
     ) {
@@ -445,14 +513,18 @@ function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-async function validateUnpack(assetId) {
-  // This reference was captured before the bridge wrapped page fetch, so the
-  // explicit bulk run does not observe and submit its own requests twice.
+async function validateUnpack(assetId, signal) {
+  // This reference was captured before the bridge wrapped page fetch, so our
+  // explicit selection and bulk requests do not re-enter external capture.
   const response = await steamFetch(
     `/gifts/${encodeURIComponent(assetId)}/validateunpack`,
     {
       credentials: "include",
-      headers: { accept: "application/json" },
+      headers: {
+        accept: "application/json",
+        "X-Requested-With": "Inventory.gift",
+      },
+      signal,
     },
   );
 
@@ -464,16 +536,89 @@ async function validateUnpack(assetId) {
 }
 
 function ownsViewedInventory() {
-  return (
-    inventorySteamId64 !== null &&
-    document.querySelector("#inventory_more_dselect_container") !== null
+  return isOwnGiftInventory(inventorySteamId64, connectedSteamId64);
+}
+
+function selectedGiftValidationCandidate(assetId) {
+  if (assetId === null) return null;
+  const classId = assetClassIds.get(assetId);
+  if (classId === undefined) return null;
+  const gift = giftLookups.get(classId);
+  return shouldValidateSelectedGift({
+    collectionRunning: collectionState.kind === "running",
+    gift,
+    hasLocalObservation: localObservations.has(classId),
+    ownInventory: credential !== null && ownsViewedInventory(),
+  })
+    ? { assetId, classId }
+    : null;
+}
+
+async function validateSelectedGift(assetId) {
+  selectedValidationTimer = null;
+  if (activeAssetId() !== assetId) return;
+  if (selectedGiftValidationCandidate(assetId) === null) return;
+  if (externalValidateRequests.has(assetId)) {
+    selectedValidationAttempted = true;
+    return;
+  }
+
+  selectedValidationAttempted = true;
+  const abortController = new unsafeWindow.AbortController();
+  selectedValidationAbortController = abortController;
+  try {
+    const observation = await validateUnpack(assetId, abortController.signal);
+    lastCaptureError = null;
+    receiveObservedValidate(assetId, observation);
+  } catch (error) {
+    if (error?.name !== "AbortError") {
+      lastCaptureError =
+        error instanceof Error
+          ? `Could not check selected gift: ${error.message}`
+          : "Could not check selected gift";
+      renderAll();
+    }
+  } finally {
+    if (selectedValidationAbortController === abortController) {
+      selectedValidationAbortController = null;
+    }
+  }
+}
+
+function scheduleSelectedGiftValidation() {
+  const assetId = activeAssetId();
+  if (assetId !== selectedValidationAssetId) {
+    resetSelectedGiftValidation();
+    selectedValidationAssetId = assetId;
+  }
+  if (
+    selectedValidationAttempted ||
+    selectedValidationTimer !== null ||
+    selectedGiftValidationCandidate(assetId) === null
+  ) {
+    return;
+  }
+  if (externalValidateRequests.has(assetId)) {
+    selectedValidationAttempted = true;
+    return;
+  }
+
+  selectedValidationTimer = setTimeout(
+    () => void validateSelectedGift(assetId),
+    selectedGiftValidationDelayMs,
   );
 }
 
 async function maybeSubmitObservedValidate(classId) {
   const observation = localObservations.get(classId);
   const gift = giftLookups.get(classId);
-  if (observation === undefined || gift === undefined) return;
+  if (observation === undefined || gift === undefined || credential === null)
+    return;
+  if (gift === null) {
+    pendingObservedClassIds.delete(classId);
+    unreportableClassIds.add(classId);
+    return;
+  }
   if (!needsPackageObservation(gift)) {
     pendingObservedClassIds.delete(classId);
     return;
@@ -491,6 +636,13 @@ async function maybeSubmitObservedValidate(classId) {
     await submitObservations([{ classId, ...observation }]);
     pendingObservedClassIds.delete(classId);
   } catch (error) {
+    if (
+      error instanceof InventoryGiftRequestError &&
+      classifyInventoryGiftStatus(error.status).localOnly
+    ) {
+      pendingObservedClassIds.delete(classId);
+      unreportableClassIds.add(classId);
+    }
     collectionState = {
       completed: 0,
       kind: "error",
@@ -507,6 +659,10 @@ async function maybeSubmitObservedValidate(classId) {
 }
 
 function receiveObservedValidate(assetId, observation) {
+  if (connectedSteamId64 === null) {
+    capturedValidateResponses.set(assetId, observation);
+    return;
+  }
   if (!ownsViewedInventory()) return;
 
   const classId = assetClassIds.get(assetId);
@@ -521,7 +677,17 @@ function receiveObservedValidate(assetId, observation) {
   void maybeSubmitObservedValidate(classId);
 }
 
+function flushCapturedValidateResponses() {
+  if (connectedSteamId64 === null) return;
+  for (const [assetId, observation] of capturedValidateResponses) {
+    if (!assetClassIds.has(assetId)) continue;
+    capturedValidateResponses.delete(assetId);
+    receiveObservedValidate(assetId, observation);
+  }
+}
+
 function receiveValidateUnpack(event) {
+  if (credential === null) return;
   if (
     event.detail === null ||
     typeof event.detail !== "object" ||
@@ -529,15 +695,58 @@ function receiveValidateUnpack(event) {
   ) {
     return;
   }
+  externalValidateRequests.delete(event.detail.assetId);
 
   try {
-    receiveObservedValidate(
-      event.detail.assetId,
-      parseValidateUnpackResponse(event.detail.response),
-    );
+    const observation = parseValidateUnpackResponse(event.detail.response);
+    lastCaptureError = null;
+    receiveObservedValidate(event.detail.assetId, observation);
   } catch {
-    // Page-context responses are untrusted and must not affect Steam.
+    lastCaptureError = "Steam returned an unsupported validateunpack response";
+    renderAll();
   }
+}
+
+function receiveValidateStart(event) {
+  if (
+    credential === null ||
+    event.detail === null ||
+    typeof event.detail !== "object" ||
+    !isDecimalId(event.detail.assetId)
+  ) {
+    return;
+  }
+
+  const assetId = event.detail.assetId;
+  externalValidateRequests.add(assetId);
+  if (selectedValidationAssetId === assetId) {
+    clearTimeout(selectedValidationTimer);
+    selectedValidationTimer = null;
+    selectedValidationAbortController?.abort();
+    selectedValidationAttempted = true;
+  }
+}
+
+function receiveValidateEnd(event) {
+  if (
+    event.detail !== null &&
+    typeof event.detail === "object" &&
+    isDecimalId(event.detail.assetId)
+  ) {
+    externalValidateRequests.delete(event.detail.assetId);
+  }
+}
+
+function receiveCaptureFailure(event) {
+  if (event.detail === null || typeof event.detail !== "object") return;
+  if (isDecimalId(event.detail.assetId)) {
+    externalValidateRequests.delete(event.detail.assetId);
+  }
+  const status = Number.isSafeInteger(event.detail.status)
+    ? ` (${event.detail.status})`
+    : "";
+  lastCaptureError = `${String(event.detail.message)}${status}`;
+  renderAll();
 }
 
 async function submitObservations(observations) {
@@ -547,10 +756,23 @@ async function submitObservations(observations) {
 
   for (let index = 0; index < observations.length; index += lookupBatchSize) {
     const batch = observations.slice(index, index + lookupBatchSize);
-    const response = await requestJson(
-      `${apiBaseUrl}/api/userscript/v1/subid-observations`,
-      { observations: batch, steamId64: inventorySteamId64 },
-    );
+    let response;
+    try {
+      response = await requestJson(
+        `${apiBaseUrl}/api/userscript/v1/subid-observations`,
+        { observations: batch },
+      );
+    } catch (error) {
+      if (
+        error instanceof InventoryGiftRequestError &&
+        classifyInventoryGiftStatus(error.status).localOnly
+      ) {
+        batch.forEach((observation) =>
+          unreportableClassIds.add(observation.classId),
+        );
+      }
+      throw error;
+    }
     const acceptedCount = parseObservationResponse(response, batch.length);
     if (acceptedCount !== batch.length) {
       throw new Error("Inventory.gift did not recognize every gift");
@@ -560,13 +782,15 @@ async function submitObservations(observations) {
 }
 
 async function collectMissingSubIds() {
-  if (
-    collectionState.kind === "running" ||
-    inventorySteamId64 === null ||
-    document.querySelector("#inventory_more_dselect_container") === null
-  ) {
+  if (collectionState.kind === "running" || !ownsViewedInventory()) {
     return;
   }
+
+  clearTimeout(selectedValidationTimer);
+  selectedValidationTimer = null;
+  selectedValidationAbortController?.abort();
+  selectedValidationAbortController = null;
+  selectedValidationAttempted = true;
 
   const targets = collectionTargets();
   if (targets.length === 0) return;
@@ -600,6 +824,7 @@ async function collectMissingSubIds() {
       }
     } catch (error) {
       failure = error instanceof Error ? error.message : "Steam request failed";
+      if (error instanceof InventoryGiftRequestError) pendingObservations = [];
       break;
     }
 
@@ -639,6 +864,7 @@ async function collectMissingSubIds() {
 function renderAll() {
   renderStatus();
   renderDetails();
+  scheduleSelectedGiftValidation();
 }
 
 function installStyles() {
@@ -667,6 +893,17 @@ function installStyles() {
       cursor: default;
       opacity: 0.65;
     }
+    .inventory-gift-disconnect {
+      background: transparent;
+      border: 0;
+      color: #8f98a0;
+      cursor: pointer;
+      font: inherit;
+      margin-left: 8px;
+      padding: 4px;
+      text-decoration: underline;
+    }
+    .inventory-gift-disconnect:focus-visible { outline: 2px solid #fff; }
     .inventory-gift-detail {
       align-items: flex-start;
       background: rgba(32, 83, 113, 0.28);
@@ -698,9 +935,12 @@ function installStyles() {
   `);
 }
 
-window.addEventListener(bridgeEventName, receiveAssets);
-window.addEventListener(validateBridgeEventName, receiveValidateUnpack);
-installCaptureBridge(unsafeWindow);
+window.addEventListener(captureEvents.inventory, receiveAssets);
+window.addEventListener(captureEvents.validate, receiveValidateUnpack);
+window.addEventListener(captureEvents.validateEnd, receiveValidateEnd);
+window.addEventListener(captureEvents.validateStart, receiveValidateStart);
+window.addEventListener(captureEvents.failure, receiveCaptureFailure);
+installSteamCaptureBridge(unsafeWindow, captureEvents);
 installStyles();
 new MutationObserver(renderAll).observe(document.documentElement, {
   childList: true,

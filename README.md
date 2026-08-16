@@ -14,6 +14,16 @@ trade offer windows or other places where Steam displays gifts.
 3. Tampermonkey will show the script and ask for confirmation. Choose
    **Install**.
 4. Open or reload a Steam Community inventory.
+5. In the **Inventory.gift** status row beneath Steam's inventory selector,
+   choose **Connect to Inventory.gift**. The script opens Inventory.gift in a
+   new tab.
+6. Sign in to Inventory.gift with Steam if needed, then approve the one-time
+   connection request. Return to the Steam inventory when its status changes
+   to **Connected**.
+
+Connecting is required before the script can look up gift details or check and
+report missing SubIDs. The connection is stored privately by the userscript in
+that browser; installing the script does not connect an account automatically.
 
 Tampermonkey is the recommended userscript manager. Other compatible managers
 may work, but are not currently tested.
@@ -25,6 +35,11 @@ select a gift, an **Inventory.gift** section appears in Steam's detail panel.
 Names, owner counts, and SubIDs are links when a useful destination is
 available.
 
+The script stays disconnected until you approve an Inventory.gift account. Its
+status area also provides **Disconnect**, which revokes that browser's private
+credential without signing you out of the website or affecting other connected
+browsers.
+
 In your own inventory, the script can also show a **Check missing SubIDs**
 button. It checks each currently loaded gift type whose SubID is not yet known.
 Checks run one at a time and results are saved in groups of 20, so stopping a
@@ -34,8 +49,14 @@ any time.
 Only inventory pages Steam has loaded are included. If your inventory has more
 pages, load them before starting the check if you want them included.
 
-The script also reuses the package check Steam already performs when you click
-a gift in your own inventory. It does not send a second copy of that request.
+When you select an eligible gift in your own inventory, the script asks Steam
+for its package information, shows it locally, and reports eligible missing
+data. If SteamDB or another extension already started the same request, this
+script reuses its response and does not send a duplicate. Use **Check missing
+SubIDs** for the explicit bulk collection flow.
+
+If Steam's request fails or its response can no longer be read, the
+Inventory.gift status reports that capture error instead of failing silently.
 
 ## Updates and troubleshooting
 
@@ -55,10 +76,12 @@ Problems and suggestions are welcome in
 ## Privacy
 
 The script sends loaded gift ClassIDs to Inventory.gift so it can look up the
-matching display information. When you deliberately check missing SubIDs—or
+matching display information using a private, narrowly scoped Inventory.gift
+credential. When you deliberately check missing SubIDs—or
 when Steam checks a gift you select in your own inventory—it may submit the
-ClassID, returned SubID and name, and the viewed inventory's SteamID as an
-observation.
+ClassID, returned SubID, and returned name as an observation. Inventory.gift
+derives reporter identity from the credential and accepts reports only for
+known gifts currently recorded in that account's inventory.
 
 It does not send Steam cookies, session tokens, or inventory asset IDs to
 Inventory.gift. See the [plain-language privacy details](docs/privacy.md) for
