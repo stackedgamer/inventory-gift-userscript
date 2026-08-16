@@ -1,35 +1,40 @@
 const decimalIdPattern = /^[0-9]+$/;
 const canonicalSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const opaqueTokenPattern = /^[A-Za-z0-9_-]{43}$/;
 
 export function isDecimalId(value) {
   return typeof value === "string" && decimalIdPattern.test(value);
 }
 
-export function isGiftInventoryUrl(value) {
-  try {
-    const url = new URL(value, window.location.href);
-    return (
-      url.origin === "https://steamcommunity.com" &&
-      /^\/inventory\/[0-9]{17}\/753\/1\/?$/.test(url.pathname)
-    );
-  } catch {
-    return false;
-  }
-}
-
-export function validateUnpackAssetIdFromUrl(
-  value,
-  baseUrl = window.location.href,
-) {
+export function classifySteamRequestUrl(value, baseUrl = window.location.href) {
   try {
     const url = new URL(value, baseUrl);
-    const match = /^\/gifts\/([0-9]+)\/validateunpack\/?$/.exec(url.pathname);
-    return url.origin === "https://steamcommunity.com"
-      ? (match?.[1] ?? null)
-      : null;
+    if (url.origin !== "https://steamcommunity.com") return null;
+
+    const inventory = /^\/inventory\/([0-9]{17})\/753\/1\/?$/.exec(
+      url.pathname,
+    );
+    if (inventory !== null) {
+      return { kind: "inventory", steamId64: inventory[1] };
+    }
+
+    const validation = /^\/gifts\/([0-9]+)\/validateunpack\/?$/.exec(
+      url.pathname,
+    );
+    return validation === null
+      ? null
+      : { assetId: validation[1], kind: "validate" };
   } catch {
     return null;
   }
+}
+
+export function isOwnGiftInventory(viewedSteamId64, accountSteamId64) {
+  return (
+    typeof viewedSteamId64 === "string" &&
+    /^[0-9]{17}$/.test(viewedSteamId64) &&
+    viewedSteamId64 === accountSteamId64
+  );
 }
 
 export function sanitizeInventoryAssets(value) {
@@ -59,21 +64,6 @@ export function sanitizeInventoryAssets(value) {
   return assets;
 }
 
-export function classIdChunks(classIds, maximumSize) {
-  if (!Number.isSafeInteger(maximumSize) || maximumSize < 1) {
-    throw new TypeError("maximumSize must be a positive safe integer");
-  }
-
-  const unique = [...new Set(classIds.filter(isDecimalId))];
-  const chunks = [];
-
-  for (let index = 0; index < unique.length; index += maximumSize) {
-    chunks.push(unique.slice(index, index + maximumSize));
-  }
-
-  return chunks;
-}
-
 export function normalizeDisplayName(value) {
   return value
     .normalize("NFKC")
@@ -98,12 +88,26 @@ export function needsBulkPackageObservation(gift) {
   return gift !== null && gift.subId === null;
 }
 
+export function shouldValidateSelectedGift({
+  collectionRunning,
+  gift,
+  hasLocalObservation,
+  ownInventory,
+}) {
+  return (
+    ownInventory &&
+    !collectionRunning &&
+    gift !== undefined &&
+    !hasLocalObservation &&
+    needsPackageObservation(gift)
+  );
+}
+
 export function selectInventoryGiftDisplayName(backendName, localName) {
   if (
     typeof localName === "string" &&
     localName.length > 0 &&
-    (backendName === null ||
-      isUnknownPackageDisplayName(backendName))
+    (backendName === null || isUnknownPackageDisplayName(backendName))
   ) {
     return localName;
   }
@@ -120,6 +124,8 @@ export function parseLookupResponse(value) {
   if (
     value === null ||
     typeof value !== "object" ||
+    typeof value.accountSteamId64 !== "string" ||
+    !/^[0-9]{17}$/.test(value.accountSteamId64) ||
     !Array.isArray(value.gifts)
   ) {
     throw new TypeError("Invalid Inventory.gift lookup response");
@@ -158,7 +164,7 @@ export function parseLookupResponse(value) {
     });
   }
 
-  return gifts;
+  return { accountSteamId64: value.accountSteamId64, gifts };
 }
 
 export function parseValidateUnpackResponse(value) {
@@ -166,6 +172,8 @@ export function parseValidateUnpackResponse(value) {
     value === null ||
     typeof value !== "object" ||
     !(value.success === 1 || value.success === true) ||
+    typeof value.message !== "string" ||
+    typeof value.owned !== "boolean" ||
     typeof value.gift_name !== "string"
   ) {
     throw new TypeError("Invalid Steam validateunpack response");
@@ -207,4 +215,46 @@ export function parseObservationResponse(value, submittedCount) {
   }
 
   return value.acceptedCount;
+}
+
+export function parsePairingCreateResponse(value) {
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    typeof value.authorizationUrl !== "string" ||
+    !URL.canParse(value.authorizationUrl) ||
+    typeof value.expiresAt !== "string" ||
+    !Number.isFinite(Date.parse(value.expiresAt)) ||
+    typeof value.pairingId !== "string" ||
+    !opaqueTokenPattern.test(value.pairingId) ||
+    typeof value.pollingSecret !== "string" ||
+    !opaqueTokenPattern.test(value.pollingSecret)
+  ) {
+    throw new TypeError("Invalid Inventory.gift pairing response");
+  }
+  return value;
+}
+
+export function parsePairingPollResponse(value) {
+  if (value?.status === "pending") return { status: "pending" };
+  if (
+    value?.status === "approved" &&
+    typeof value.credential === "string" &&
+    opaqueTokenPattern.test(value.credential)
+  ) {
+    return { credential: value.credential, status: "approved" };
+  }
+  throw new TypeError("Invalid Inventory.gift pairing poll response");
+}
+
+export function isUserscriptCredential(value) {
+  return typeof value === "string" && opaqueTokenPattern.test(value);
+}
+
+export function classifyInventoryGiftStatus(status) {
+  return {
+    localOnly: status === 409,
+    rateLimited: status === 429,
+    reconnect: status === 401 || status === 403,
+  };
 }

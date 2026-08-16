@@ -12,6 +12,10 @@
 // @match        https://steamcommunity.com/profiles/*/inventory*
 // @connect      127.0.0.1
 // @grant        GM_addStyle
+// @grant        GM_deleteValue
+// @grant        GM_getValue
+// @grant        GM_openInTab
+// @grant        GM_setValue
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
 // @run-at       document-start

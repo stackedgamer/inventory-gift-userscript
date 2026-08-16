@@ -1,58 +1,43 @@
 # Privacy
 
-Status: current release
+Status: authenticated inventory-only release
 
-## Read-only inventory enrichment
+## Account connection
 
-When a supported Steam gift inventory is open, the userscript processes these
-fields from Steam's inventory response:
+The script requires a separate Inventory.gift userscript credential. Pairing
+opens Inventory.gift for explicit approval through the normal Steam sign-in.
+The website session remains HttpOnly and is never exposed to the script. The
+long-lived credential is never put in a URL and is stored only in the
+userscript manager's private storage until disconnected, revoked, or rejected.
+It authorizes only gift lookup and package observation submission.
 
-- `appid`;
-- `contextid`;
-- `assetid`; and
-- `classid`.
+## Inventory enrichment
 
-Asset IDs are used only in browser memory to associate Steam's rendered item
-with its ClassID. They are not included in Inventory.gift lookup requests and
-are not persisted by the userscript.
-
-The lookup request sends only distinct loaded ClassIDs. Inventory.gift returns
-its display name and effective SubID for recognized ClassIDs. The script does
-not read or transmit Steam cookies, session tokens, inventory descriptions, or
-other browsing history.
+The script reads Steam inventory `appid`, `contextid`, `assetid`, and `classid`.
+Asset IDs remain in browser memory and are never submitted or persisted.
+Authenticated lookup sends only distinct loaded ClassIDs. The script does not
+read or send Steam cookies/session tokens, inventory descriptions, or browsing
+history.
 
 ## Package observations
 
-When Steam displays its own-inventory controls, the user may deliberately start
-one collection run for all currently loaded recognized ClassIDs whose SubID is
-missing. Unknown-package names with an effective SubID are already considered
-checked for bulk purposes. The script sends one authenticated Steam request per
-ClassID, sequentially and 500 milliseconds apart. It provides progress and
-cancellation.
+The bulk action covers only loaded, backend-recognized ClassIDs with missing
+effective SubIDs. It runs Steam requests sequentially at 500 ms and checkpoints
+every 20. Selecting an eligible gift in the connected account's own inventory
+also makes a `validateunpack` request to Steam. If another extension has already
+started that request, the script reuses its response instead of sending a
+duplicate. These Steam requests contain the gift asset ID and use the existing
+Steam Community browser session; Inventory.gift never receives the asset ID or
+Steam session. A report contains only ClassID, returned package SubID, and
+returned name or null; reporter identity comes from the Inventory.gift
+credential.
 
-The intended submission contains:
+Inventory.gift accepts a report only if the connected account currently owns
+that known ClassID in its recorded inventory. Unknown/unrecorded ClassIDs remain
+local. Evidence stores one current row/vote per account and ClassID, timestamps,
+submission/conflict counts, and the latest non-empty name. It does not store an
+IP address. Repeats never increase voting weight.
 
-- the ClassID;
-- Steam's returned `packageid` as the reported SubID;
-- Steam's returned `gift_name`, or a missing value when Steam returns it empty;
-- the SteamID claimed for the viewed inventory.
-
-The SteamID is provenance supplied by the client, not proof of identity. Raw
-asset IDs, cookies, and Steam authentication material will not be submitted.
-Inventory.gift retains submissions as evidence in a separate table.
-
-Inventory.gift deduplicates identical evidence while retaining conflicts. Raw
-evidence may be retained even when the ClassID is not yet known by the site.
-For an existing gift, Inventory.gift may fill a missing effective SubID and may
-rename a differing linked display name only when the current display name
-contains `unknown package`. Raw Steam gift names, existing effective SubIDs,
-and ordinary display names are not overwritten.
-
-Completed observations are submitted after every 20 gifts and any remainder is
-submitted when the run completes, is cancelled, or stops after an error.
-
-When Steam performs its normal check for a selected gift in the owner's
-inventory, the userscript observes that existing response rather than making a
-second request. If the backend lookup is unknown, lacks an effective SubID, or
-has an unknown-package name, the same observation fields are submitted and the
-returned name/SubID are kept only in browser memory for immediate local display.
+Authenticated distinct-account evidence may provisionally fill a missing SubID
+and rename only an unknown-package canonical display name. Administrator and
+Steam-derived values take precedence. Raw Steam gift names are never changed.
