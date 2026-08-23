@@ -1,10 +1,10 @@
 {
   "name": "inventory-gift-userscript",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Inventory.gift enhancements for Steam Community gift inventories",
   "license": "MIT",
-  "homepage": "https://inventory.gift/",
+  "homepage": "https://beta.inventory.gift/",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/stackedgamer/inventory-gift-userscript.git"

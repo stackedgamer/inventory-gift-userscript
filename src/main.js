@@ -1,5 +1,5 @@
-const apiBaseUrl = "http://127.0.0.1:4000";
-const siteBaseUrl = "http://localhost:3000";
+const apiBaseUrl = "https://beta.inventory.gift";
+const siteBaseUrl = "https://beta.inventory.gift";
 const lookupBatchSize = 100;
 const lookupDebounceMs = 150;
 const validateUnpackDelayMs = 500;

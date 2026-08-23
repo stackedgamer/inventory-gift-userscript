@@ -60,7 +60,8 @@ If the Inventory.gift section does not appear:
 - make sure the userscript is enabled;
 - reload the Steam inventory page;
 - confirm you are viewing the **Steam Gifts** inventory; and
-- check whether [Inventory.gift](https://inventory.gift/) is available.
+- check whether [Inventory.gift beta](https://beta.inventory.gift/) is
+  available.
 
 Problems and suggestions are welcome in
 [GitHub Issues](https://github.com/stackedgamer/inventory-gift-userscript/issues).
