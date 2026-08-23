@@ -10,6 +10,25 @@ const captureBridge = await readFile(
   new URL("../src/capture-bridge.js", import.meta.url),
   "utf8",
 );
+const metadata = await readFile(
+  new URL("../src/metadata.txt", import.meta.url),
+  "utf8",
+);
+
+test("published runtime targets beta and preauthorizes the canonical host", () => {
+  assert.match(
+    source,
+    /const apiBaseUrl = "https:\/\/beta\.inventory\.gift"/,
+  );
+  assert.match(
+    source,
+    /const siteBaseUrl = "https:\/\/beta\.inventory\.gift"/,
+  );
+  assert.match(metadata, /^\/\/ @connect\s+beta\.inventory\.gift$/m);
+  assert.match(metadata, /^\/\/ @connect\s+inventory\.gift$/m);
+  assert.doesNotMatch(source, /localhost|127\.0\.0\.1/);
+  assert.doesNotMatch(metadata, /@connect\s+(?:localhost|127\.0\.0\.1)/);
+});
 
 test("bulk validation uses the pre-bridge fetch and keeps checkpointing", () => {
   assert.match(

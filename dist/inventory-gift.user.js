@@ -1,16 +1,17 @@
 // ==UserScript==
 // @name         Inventory.gift
 // @namespace    https://inventory.gift/
-// @version      1.0.0
+// @version      1.0.1
 // @description  Add Inventory.gift names, owner counts, and SubIDs to Steam gift inventories.
-// @homepageURL  https://inventory.gift/
+// @homepageURL  https://beta.inventory.gift/
 // @supportURL   https://github.com/stackedgamer/inventory-gift-userscript/issues
 // @downloadURL  https://raw.githubusercontent.com/stackedgamer/inventory-gift-userscript/main/dist/inventory-gift.user.js
 // @updateURL    https://raw.githubusercontent.com/stackedgamer/inventory-gift-userscript/main/dist/inventory-gift.user.js
 // @license      MIT
 // @match        https://steamcommunity.com/id/*/inventory*
 // @match        https://steamcommunity.com/profiles/*/inventory*
-// @connect      127.0.0.1
+// @connect      beta.inventory.gift
+// @connect      inventory.gift
 // @grant        GM_addStyle
 // @grant        GM_deleteValue
 // @grant        GM_getValue
@@ -487,8 +488,8 @@ function installSteamCaptureBridge(pageWindow, eventNames) {
 }
 
 
-const apiBaseUrl = "http://127.0.0.1:4000";
-const siteBaseUrl = "http://localhost:3000";
+const apiBaseUrl = "https://beta.inventory.gift";
+const siteBaseUrl = "https://beta.inventory.gift";
 const lookupBatchSize = 100;
 const lookupDebounceMs = 150;
 const validateUnpackDelayMs = 500;
