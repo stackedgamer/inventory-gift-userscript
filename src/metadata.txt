@@ -1,16 +1,16 @@
 // ==UserScript==
 // @name         Inventory.gift
 // @namespace    https://inventory.gift/
-// @version      1.0.1
+// @version      1.0.2
 // @description  Add Inventory.gift names, owner counts, and SubIDs to Steam gift inventories.
-// @homepageURL  https://beta.inventory.gift/
+// @homepageURL  https://www.inventory.gift/
 // @supportURL   https://github.com/stackedgamer/inventory-gift-userscript/issues
 // @downloadURL  https://raw.githubusercontent.com/stackedgamer/inventory-gift-userscript/main/dist/inventory-gift.user.js
 // @updateURL    https://raw.githubusercontent.com/stackedgamer/inventory-gift-userscript/main/dist/inventory-gift.user.js
 // @license      MIT
 // @match        https://steamcommunity.com/id/*/inventory*
 // @match        https://steamcommunity.com/profiles/*/inventory*
-// @connect      beta.inventory.gift
+// @connect      www.inventory.gift
 // @connect      inventory.gift
 // @grant        GM_addStyle
 // @grant        GM_deleteValue
