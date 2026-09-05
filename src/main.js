@@ -1,5 +1,5 @@
-const apiBaseUrl = "https://beta.inventory.gift";
-const siteBaseUrl = "https://beta.inventory.gift";
+const apiBaseUrl = "https://www.inventory.gift";
+const siteBaseUrl = "https://www.inventory.gift";
 const lookupBatchSize = 100;
 const lookupDebounceMs = 150;
 const validateUnpackDelayMs = 500;

@@ -15,17 +15,23 @@ const metadata = await readFile(
   "utf8",
 );
 
-test("published runtime targets beta and preauthorizes the canonical host", () => {
+test("published runtime targets and preauthorizes the canonical host", () => {
   assert.match(
     source,
-    /const apiBaseUrl = "https:\/\/beta\.inventory\.gift"/,
+    /const apiBaseUrl = "https:\/\/www\.inventory\.gift"/,
   );
   assert.match(
     source,
-    /const siteBaseUrl = "https:\/\/beta\.inventory\.gift"/,
+    /const siteBaseUrl = "https:\/\/www\.inventory\.gift"/,
   );
-  assert.match(metadata, /^\/\/ @connect\s+beta\.inventory\.gift$/m);
+  assert.match(
+    metadata,
+    /^\/\/ @homepageURL\s+https:\/\/www\.inventory\.gift\/$/m,
+  );
+  assert.match(metadata, /^\/\/ @connect\s+www\.inventory\.gift$/m);
   assert.match(metadata, /^\/\/ @connect\s+inventory\.gift$/m);
+  assert.doesNotMatch(source, /beta\.inventory\.gift/);
+  assert.doesNotMatch(metadata, /beta\.inventory\.gift/);
   assert.doesNotMatch(source, /localhost|127\.0\.0\.1/);
   assert.doesNotMatch(metadata, /@connect\s+(?:localhost|127\.0\.0\.1)/);
 });
